@@ -6,6 +6,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
+from trl import DataCollatorForCompletionOnlyLM
+
+# This tells the trainer to only calculate loss on text after this tag
+response_template = "<|im_start|>assistant\n"
+collator = DataCollatorForCompletionOnlyLM(
+    response_template, tokenizer=tokenizer)
 
 # Load credentials from .env file
 load_dotenv()
@@ -33,7 +39,8 @@ tokenizer.pad_token = tokenizer.eos_token
 
 # 2. LOCAL DATA LOADING
 # Assuming your file is named 'training_data.jsonl' in the same directory
-dataset = load_dataset("json", data_files="training_data.jsonl", split="train")
+dataset = load_dataset(
+    "json", data_files="../Data Generation/dataset.jsonl", split="train")
 
 # 3. QLoRA CONFIGURATION
 lora_config = LoraConfig(
@@ -64,23 +71,34 @@ sft_config = SFTConfig(
     save_steps=100,
     push_to_hub=True,  # Automatically pushes checkpoints to HF
     hub_model_id=output_name,
+    gradient_checkpointing=True,
+    # Required for modern versions
+    gradient_checkpointing_kwargs={"use_reentrant": False},
 )
 
 
-def formatting_prompts_func(example):
+def formatting_prompts_func(examples):
     output_texts = []
-    for i in range(len(example['Instruction'])):
-        # This is the standard Qwen/ChatML template
-        text = f"<|im_start|>user\n{example['Instruction'][i]}<|im_end|>\n<|im_start|>assistant\n{example['Response'][i]}<|im_end|>"
-        output_texts.append(text)
+    # Loop through each list of messages in the batch
+    for i in range(len(examples["messages"])):
+        messages = examples["messages"][i]
+        # Use apply_chat_template to handle system, user, and assistant roles
+        # tokenize=False returns a string instead of IDs
+        formatted_text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+        output_texts.append(formatted_text)
     return output_texts
 
 
+# When you call the trainer, just pass this function:
 trainer = SFTTrainer(
     model=model,
     train_dataset=dataset,
     peft_config=lora_config,
-    formatting_func=formatting_prompts_func,  # Use the function here
+    formatting_func=formatting_prompts_func,
     args=sft_config,
 )
 
