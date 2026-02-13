@@ -66,11 +66,21 @@ sft_config = SFTConfig(
     hub_model_id=output_name,
 )
 
+
+def formatting_prompts_func(example):
+    output_texts = []
+    for i in range(len(example['Instruction'])):
+        # This is the standard Qwen/ChatML template
+        text = f"<|im_start|>user\n{example['Instruction'][i]}<|im_end|>\n<|im_start|>assistant\n{example['Response'][i]}<|im_end|>"
+        output_texts.append(text)
+    return output_texts
+
+
 trainer = SFTTrainer(
     model=model,
     train_dataset=dataset,
     peft_config=lora_config,
-    dataset_text_field="text",  # Ensure your .jsonl has a "text" column
+    formatting_func=formatting_prompts_func,  # Use the function here
     args=sft_config,
 )
 
